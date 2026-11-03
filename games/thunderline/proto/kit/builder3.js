@@ -1340,7 +1340,11 @@ async function runPrediction() {
   renderStatus();
   // a real flight (≥ 0.8 s, as the landing judge counts one), in driving order
   if (resume) confirmFullLap(token);
+  // (a flight still in the air when the lap ends — it came down by the track's end, the lap was over first — is a jump
+  // too: it went untested, a flip ramp landing that a crooked take-off misses was never checked — user, 2026-11-03)
+  if (lastTakeoff && lastTakeoff.air == null && airT > 0) lastTakeoff.air = airT;
   const jumps = [...takeoffs.values()].filter((t) => t.air != null && t.air >= LANDING.minAir).sort((a, b) => a.tick - b.tick);
+  prediction.takeoffs = [...takeoffs.values()].map((t) => ({ uid: t.uid, label: t.label, air: t.air, tick: t.tick })); // (the test lap's take-offs: for the console)
   if (jumps.length) runForgiveness(token, { ground, obs, boosts, magnets, cutZones, ride: pilotRide, lowY, jumps });
 }
 
@@ -1613,6 +1617,9 @@ applyBloomMRT(ARC_HUMAN_MAT, color(0xffffff).mul(3));
 // (the old game's: 0xff3b30, glow ×9 — a 1 px line feeds the bloom a fraction of what a mesh does)
 const ARC_MAT = new THREE.LineBasicNodeMaterial({ color: 0xff3b30, transparent: true, opacity: 1, depthWrite: false, toneMapped: false });
 applyBloomMRT(ARC_MAT, color(0xff3b30).mul(9));
+// (the catch zone's spread when the landing is too narrow for it: amber, as the builder's warnings)
+const ARC_WARN_MAT = new THREE.LineBasicNodeMaterial({ color: 0xffa020, transparent: true, opacity: 1, depthWrite: false, toneMapped: false });
+applyBloomMRT(ARC_WARN_MAT, color(0xffa020).mul(6));
 /** A jump pad's flight, ended where it comes back DOWN onto a road (the one it left, or any). The road's
  * points are kept per refresh: the notes fly the arc again at up to 40 speeds per mouse move. */
 
@@ -1735,6 +1742,8 @@ function runChecks() {
     // ring reached 24 m in FRONT of a wide platform's start: the car still rising before it read as "hits
     // it from below" — a level platform on an arc, 2026-10-21.)
     const lowest = Math.min(...deck.map((s) => s.P.y));
+    // where an arc comes down ON the landing road: the index of that point (-1: it doesn't), the deck's half width there
+    let touchHw = 0;
     const lands = (pts) => {
       let apex = 0;
       pts.forEach((p, i) => { if (p.y > pts[apex].y) apex = i; });
@@ -1749,16 +1758,20 @@ function runChecks() {
           if (along < -3 || along > s.len + 3 || Math.abs(d.dot(s.R)) > Math.max(s.hw, 6)) continue;
           const h = d.dot(s.U);
           if (h >= -0.5) above = true; // over it, or ON it (a fitted landing starts exactly on the near arc)
-          else if (above) return true; // came down onto the deck
-          else if (h < -2) return false; // under the deck: it hits the landing from below
+          else if (above) { touchHw = s.hw; return i; } // came down onto the deck
+          else if (h < -2) return -1; // under the deck: it hits the landing from below
         }
-        if (i > apex && p.y < lowest - 4) return false; // came down past it (rising below it is fine)
+        if (i > apex && p.y < lowest - 4) return -1; // came down past it (rising below it is fine)
       }
-      return false;
+      return -1;
     };
     // every landing is a PRECISION target (2026-10-21): the full-speed flight has to come down on it;
     // a slower car falling short is the jump's challenge, not a fault
-    if (!lands(a.fast.pts)) problems.misses.push({ uid: pc.uid });
+    const i100 = lands(a.fast.pts), hw100 = touchHw;
+    if (i100 < 0) { problems.misses.push({ uid: pc.uid }); a.zone = null; continue; }
+    // THE CATCH ZONE (catchZone): the same test for a car 5 % slower and 5 % faster, on the deck as it is (its slopes)
+    a._fly105 ??= a.fly(ZONE.fast);
+    a.zone = catchZone(a, i100, hw100, lands(a.near.pts), lands(a._fly105.pts));
   }
   for (const m of problems.misses) {
     const name = TILES[track.pieces.find((q) => q.uid === m.uid).id]?.label ?? "a landing";
@@ -1766,6 +1779,16 @@ function runChecks() {
     if (track.pieces.find((q) => q.uid === m.uid).id.startsWith("catch_tube_")) { problems.messages.push(`"${name}": the full-speed car misses its mouth — Re-fit it to the jump`); continue; }
     problems.messages.push(`"${name}": the full-speed car misses it — ${fitted ? "Re-fit it to the jump" : "move it on the red arc or use a Fitted landing"}`);
   }
+  // A REAL TAKE-OFF ISN'T THE TEST CAR'S (catchZone): it lands where the full-speed car does, but crooked or faster too
+  for (const a of arcs) {
+    const z = a.landing != null && !problems.misses.some((m) => m.uid === a.landing) ? a.zone : null;
+    if (!z) continue;
+    const name = TILES[track.pieces.find((q) => q.uid === a.landing).id]?.label ?? "a landing";
+    if (z.fall < ZONE.minFall) problems.messages.push(`"${name}": it sits at the top of the flight (the car falls only ${Math.round(z.fall)}° there) — a little more speed flies over it: move it lower on the arc`);
+    // (crooked and faster take-offs: the FORGIVENESS check flies them with the real car — runForgiveness, its panel;
+    // a geometric warning here flagged every big jump of the campaign)
+  }
+  drawZones();
   // tint overlapping pieces: a red box around each
   for (const c of overlapBoxes.splice(0)) { scene.remove(c); disposeTree(c, true); }
   for (const [uid, color] of [...[...problems.overlap].map((u) => [u, 0xff4d5e]), ...problems.loose.map((u) => [u, 0xff9a3d]), ...problems.misses.map((m) => [m.uid, 0xff9a3d])]) {
@@ -1777,6 +1800,23 @@ function runChecks() {
   }
 }
 const overlapBoxes = [];
+// THE CATCH ZONES, drawn (runChecks → a.zone): a tick where a car 5 % slower / at the test speed / 5 % faster comes down
+// on the landing, and across the test car's touchdown the spread of a ZONE.deg° crooked take-off — white while the road
+// catches it, amber off it
+const zoneGroup = new THREE.Group();
+scene.add(zoneGroup);
+function drawZones() {
+  for (const c of zoneGroup.children.slice()) { zoneGroup.remove(c); c.geometry.dispose(); }
+  const line = (A, B, mat) => { const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([A, B]), mat); l.frustumCulled = false; l.renderOrder = 3; zoneGroup.add(l); };
+  const up = new THREE.Vector3(0, 3, 0), dn = new THREE.Vector3(0, -0.5, 0);
+  for (const a of arcs) {
+    const z = a.zone;
+    if (!z || a.landing == null || problems.misses.some((m) => m.uid === a.landing)) continue;
+    for (const [q, mat] of [[z.p95, ARC_HUMAN_MAT], [z.p100, ARC_MAT], [z.p105, ARC_HUMAN_MAT]]) if (q) line(q.clone().add(up), q.clone().add(dn), mat);
+    const half = Math.max(1, z.spread);
+    line(z.p100.clone().addScaledVector(z.side, -half), z.p100.clone().addScaledVector(z.side, half), z.spread > z.hw - 1 ? ARC_WARN_MAT : ARC_HUMAN_MAT);
+  }
+}
 
 // ---------- ghost + snapping (P1b order: open ends → flight arcs → local grid → world grid) ----------
 const ghostMat = new THREE.MeshBasicMaterial({ color: SNAP_COLORS.world, transparent: true, opacity: 0.5, depthWrite: false });
@@ -2175,6 +2215,30 @@ function downAt(arc, y) {
   }
   return null;
 }
+// THE CATCH ZONE (user, 2026-11-03, a flip ramp: "the way the arc calculates the jump is completely wrong"): measured,
+// the arc was right for the TEST car's take-off — but that car takes off dead straight. A real one is a degree or two off,
+// and on a long flight (a flip ramp: 6-7 s in the air) 2° put it 15 m beside a 24 m road: a landing the builder said
+// was fine missed. So each landing shows, and is checked against, what a real take-off does: where a car 5 % slower,
+// at the test speed and 5 % faster comes down through its height; how steeply it falls there; and how far a take-off
+// `ZONE.deg`° crooked lands to the side.
+// (`deg`: a player's heading error — 2°, as the forgiveness check's "fair" — drawn as the bar across the touchdown)
+const ZONE = { slow: NEAR, fast: 1.05, deg: 2, minFall: 6 };
+/**
+ * A jump's catch zone, from where its arcs come down ON the landing road (runChecks' deck test: the deck as it is, its
+ * slopes, the pieces after it): `i100` the test car's touchdown (index into a.fast.pts), `hw` the deck's half width
+ * there, `i95` / `i105` the slower / faster car's (-1: it doesn't land on it).
+ */
+function catchZone(a, i100, hw, i95, i105) {
+  const at = (pts, i) => (i >= 0 ? pts[i] : null);
+  const p100 = a.fast.pts[i100], T = a.fast.tan[i100], lip = a.fast.pts[0];
+  const h = new THREE.Vector3(T.x, 0, T.z).normalize();
+  const dist = Math.hypot(p100.x - lip.x, p100.z - lip.z);
+  return {
+    p95: at(a.near.pts, i95), p100, p105: at(a._fly105.pts, i105), hw, h, side: new THREE.Vector3().crossVectors(h, UP).normalize(),
+    spread: dist * Math.sin(ZONE.deg * DEG), secs: i100 / 30, // (a point every 4 steps of 1/120 s)
+    fall: Math.asin(THREE.MathUtils.clamp(-T.y, -1, 1)) / DEG, fastMisses: i105 < 0,
+  };
+}
 /** The builder's line about it. */
 const reachNote = (a, sMin) => `lands from ${Math.round(a.lip.v * sMin * 3.6)} km/h (full speed ${Math.round(a.lip.v * 3.6)}) — slower falls short`;
 const ROUGH_FALL = 22; // °: steeper than this onto flat needs the player to level the car (else rough)
@@ -2336,6 +2400,8 @@ function computeSnap() {
     const fast = cross(a.fast.pts) ?? { p: a.fast.pts[best.k].clone(), fall: Math.asin(THREE.MathUtils.clamp(-a.fast.tan[best.k].y, -1, 1)) / DEG };
     const near = cross(a.near.pts) ?? fast;
     const h = new THREE.Vector3(a.fast.tan[best.k].x, 0, a.fast.tan[best.k].z).normalize();
+    // (NOT AT THE TOP of a flight: there a car barely comes down, a little faster flies over — catchZone)
+    const topOfFlight = Math.min(near.fall, fast.fall) < ZONE.minFall ? `At the top of the flight (the car falls ${Math.round(Math.min(near.fall, fast.fall))}° here) — point lower on the arc, where it comes down` : null;
     const start = near.p.clone().addScaledVector(h, -LAND_LEAD);
     start.y = y0;
     const m = socketMatrix({ p: start, T: h, U: UP.clone(), R: new THREE.Vector3().crossVectors(h, UP).normalize() });
@@ -2349,7 +2415,7 @@ function computeSnap() {
     if (fast.fall > ROUGH_FALL) notes.push(`steep onto flat (${Math.round(fast.fall)}°): level the car in the air, or use a landing slope`);
     const roll = rollNote(a, m, leanIn(t));
     if (roll) notes.push(roll);
-    return { type: "arc", m, from: a.from, bad: leanIn(t) ? "A landing must start flat (lean 0)" : null, note: notes.join(" · ") };
+    return { type: "arc", m, from: a.from, bad: leanIn(t) ? "A landing must start flat (lean 0)" : topOfFlight, note: notes.join(" · ") };
   }
   if (best) {
     // a landing slides along the arc to where the fall angle equals its own → its exit comes out level
@@ -3569,7 +3635,7 @@ const DRIVE_HELP = `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows dr
 function enterDriveView() {
   driving = true;
   gizmo.detach();
-  const objs = [grid, trackGroup, arcGroup, lapGroup, ghost, selBox, failBox, ...overlapBoxes].filter(Boolean);
+  const objs = [grid, trackGroup, arcGroup, zoneGroup, lapGroup, ghost, selBox, failBox, ...overlapBoxes].filter(Boolean);
   saved = { vis: objs.map((o) => [o, o.visible]), ui: builderUi.map((id) => [id, $(id).style.display]), pos: camera.position.clone(), quat: camera.quaternion.clone(), fov: camera.fov, target: controls.target.clone() };
   for (const o of objs) o.visible = false;
   for (const id of builderUi) $(id).style.display = "none";
@@ -3947,7 +4013,7 @@ window.__b3 = {
   get arcs() { return arcs; }, get propBatch() { return propBatch; }, get launch() { return prediction.launch; },
   get profile() { return prediction.profile; },
   get lapSamples() { return lapCache?.samples; },
-  get prediction() { return { state: prediction.state, resumedAt: prediction.resumedAt, ms: prediction.ms, ticks: prediction.ticks, fail: prediction.fail, lapS: prediction.lapS, openJump: prediction.openJump, endSpeed: prediction.endSpeed, landings: prediction.landings, topKmh: Math.round(prediction.topKmh), lips: [...prediction.lipSpeed.entries()].map(([u, v]) => [u, Math.round(v * 3.6)]) }; },
+  get prediction() { return { state: prediction.state, resumedAt: prediction.resumedAt, ms: prediction.ms, ticks: prediction.ticks, fail: prediction.fail, lapS: prediction.lapS, openJump: prediction.openJump, endSpeed: prediction.endSpeed, landings: prediction.landings, forgive: [...(prediction.forgive?.values() ?? [])], takeoffs: prediction.takeoffs, resumedAt: prediction.resumedAt, topKmh: Math.round(prediction.topKmh), lips: [...prediction.lipSpeed.entries()].map(([u, v]) => [u, Math.round(v * 3.6)]) }; },
 };
 for (const k of ["aimEnd", "aimArc", "aimFast", "setMouse", "frameAll"]) window.__b3[k] = hookAim(window.__b3[k]);
 window.__b3.navPick = (x, y) => nav.pickAt?.(new THREE.Vector2((x / innerWidth) * 2 - 1, -(y / innerHeight) * 2 + 1)) ?? null;

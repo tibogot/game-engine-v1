@@ -1559,6 +1559,7 @@ export function batchStaticLooks(looks, parent, cache = new Map()) {
       hit = { sig, mesh: im };
       cache.set(k, hit);
     }
+    hit.mesh.visible = true; // (a gizmo drag hid it — setActive(false) — and the rebuild after the move reuses it: user 11-03, "the hole wall disappearing")
     parent.add(hit.mesh);
     meshes.push(hit.mesh);
     for (const o of list) { o.visible = false; o.userData.batchHidden = true; hidden.push(o); }
@@ -1595,6 +1596,7 @@ export function batchStaticLooks(looks, parent, cache = new Map()) {
       cache.set(k, hit);
     }
     used.add(k);
+    hit.mesh.visible = true; // (a gizmo drag hid it — setActive(false) — and the rebuild after the move reuses it: user 11-03, "the hole wall disappearing")
     parent.add(hit.mesh);
     meshes.push(hit.mesh);
     for (const o of list) { o.visible = false; o.userData.batchHidden = true; hidden.push(o); }
