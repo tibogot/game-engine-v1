@@ -505,6 +505,8 @@ fn scFbm( uv: vec2f, profile: vec4f ) -> f32 {
 
 // ------------------------------------------------------------------ WGSL: temporal resolve helpers (verbatim but for PORT:)
 const TEMPORAL_WGSL = /* wgsl */`
+const FM_TRUST_MOTION = vec2f( 0.25, 1.5 ); // history pixels of motion: full trust below .x, Sky Pro's clamp above .y
+const FM_STILL_KEEP = 0.8; // history kept by a fresh pixel while the view holds still (Sky Pro: 0.25-0.65)
 // PORT: the workgroup tile was a cache of textureLoads; load directly (identical values)
 // PORT: clamp to the ACTIVE source area (history size / lattice): the source texture is allocated for
 // the denser 2x2 lattice used while the sun moves, and the 4x4 lattice fills only part of it
@@ -738,9 +740,19 @@ fn scResolveAt( gate: f32, id: vec2u, cC: texture_2d<f32>, cM: texture_2d<f32>, 
 	let valid = previous.z > 0.0 && all( previous.xy >= vec2f( 0.0 ) ) && all( previous.xy <= vec2f( 1.0 ) ) && oldMeta.y >= 0.001;
 	var carriedDepth = currentDepth; var historyFraction = 0.0;
 	if ( valid ) {
-		let history = clamp( scHistoryAt( previous.xy, vec2f( size ), pC, smp ), low, high );
+		// FIRMAMENT: the clamp box comes from the SPARSE trace (1 pixel in lattice x lattice, its offset
+		// changing every frame). A cloud a few history pixels wide is missed by those taps on some frames,
+		// gets clamped to sky, then comes back when traced again = small clouds and thin edges flickering
+		// (user, 2026-11-02; Sky Pro does it too). The reprojection is exact while the view holds still
+		// (wind is carried by windDelta), so the clamp only bites as the view moves.
+		let reprojected = scHistoryAt( previous.xy, vec2f( size ), pC, smp );
 		let motionPixels = length( ( previous.xy - uv ) * vec2f( size ) );
-		historyFraction = select( 1.0, scFreshHistoryWeight( central, currentDepth ), fresh );
+		let trust = 1.0 - smoothstep( FM_TRUST_MOTION.x, FM_TRUST_MOTION.y, motionPixels );
+		let history = mix( clamp( reprojected, low, high ), reprojected, trust );
+		// a still view also keeps more history on the fresh pixels (each fresh trace is one dithered
+		// march: at thin edges it jumps; 0.35-0.75 fresh weight made them twinkle every 16 frames)
+		let freshKeep = mix( scFreshHistoryWeight( central, currentDepth ), FM_STILL_KEEP * ( 1.0 - scf.temporal.y ), trust );
+		historyFraction = select( 1.0, freshKeep, fresh );
 		color = mix( color, history, historyFraction );
 		let expectedDepth = length( world - scf.previousPosition.xyz ) * 0.001;
 		if ( ! fresh && ( motionPixels <= 0.5 || abs( oldMeta.y - expectedDepth ) < max( 0.001, expectedDepth * 0.15 ) ) ) {
