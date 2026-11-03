@@ -594,7 +594,7 @@ Texture names: "_arm" (not "_orm") so the KTX2 tool keeps them linear. The mesh 
       wheel MODEL sets the physics radius today — carTune.js pins it).
 - [ ] "No engine up a wall" into the car itself (today an input cut, autopilot.js wallCut).
 
-## PERFORMANCE AUDIT 2026-11-02 → games/thunderline/PERF_AUDIT_2026_11.md (measured + ranked; nothing done yet)
+## PERFORMANCE AUDIT 2026-11-02 → games/thunderline/PERF_AUDIT_2026_11.md (steps 2, 3, 5-6 done; what remains: its REMAINING section)
 
 ## Performance pass (user, 2026-10-20: "be sure the pieces and the scene are as optimized as possible")
 BASELINE, drive page, White 1 (1.53 km), counts per frame (draws / k-triangles drawn), by subtraction:

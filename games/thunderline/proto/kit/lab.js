@@ -45,6 +45,8 @@ const trisOf = (g) => (g ? (g.index ? g.index.count : g.getAttribute("position")
 function pieceGroup(look) {
   const g = new THREE.Group();
   g.add(new THREE.Mesh(look.deck, mats.road));
+  for (const e of look.ends ?? []) if (e.geo) g.add(new THREE.Mesh(e.geo, mats.road)); // (its lids: the road is one-sided)
+  if (look.capsFixed) g.add(new THREE.Mesh(look.capsFixed, mats.road));
   if (look.rail) g.add(new THREE.Mesh(look.rail, mats.rail));
   if (look.posts?.template && look.posts.matrices.length) {
     const im = new THREE.InstancedMesh(look.posts.template, mats.rail, look.posts.matrices.length);

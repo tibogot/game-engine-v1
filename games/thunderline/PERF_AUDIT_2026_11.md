@@ -211,3 +211,35 @@ The original analysis follows:
 - SSAO is off.
 - r187 already skips MSAA on full-screen passes.
 - The headlights are binned by the clustered lights.
+
+## REMAINING (kept up to date — 2026-11-03)
+
+Game-only:
+- [x] **One-sided road** — DONE 11-03:
+  - deckClosedTest.mjs: all 184 road decks are closed solids facing out (it found and fixed a 0.6 m slit at the wedge / curved wedge / round end tips: fixed lids).
+  - The glass road's windowed deck has its own double-sided copy (mats.roadOpen).
+  - The dock and gizmo pieces carry their lids. `?roadside=double`: the old way.
+  - GPU gain: none measurable (drive +0.03 ms, builder noise). It is a correctness and shading change.
+- [ ] **Far versions of the deck and tubes** — MEASURED 11-03, NOT worth it now:
+  - The decks are 441k triangles on the lab, but hiding them ALL saved only 0.5 ms of 4.8 in the builder, so a far version would save about 0.2–0.3 ms.
+  - The cost: a simplified sweep per piece with lids and matching colour (no pop at the switch). Revisit if a big track struggles.
+- [ ] **The road's SHADER** (user, 11-03: "maybe we can improve or do things differently … maybe there is optimization on it" — LATER): roadSurface.js / modularRoadMaterial.js's road material (the asphalt scan + worn lines + the stunt bands' node graph). Measure its share of the frame (the road covers much of the chase view), list its texture taps and branches, compare with a leaner build (baked lines, fewer taps, LOD of the detail with distance).
+- [ ] **FXAA off** (0.09 ms, sharper) and **bloom at ¼ resolution** (0.22 ms): the user's eye, screenshots A/B.
+- [ ] physProps re-uploads every prop matrix each frame even asleep (physProps.js:265-284): re-place on movement only.
+- [ ] The live shadow map's colour target (36 MB): depth-only needs a rework of the map (three's targets always have colour).
+- [ ] Ghost car (LOD1) loads its own 9 textures it never shows (the hologram): a geometry-only file.
+- [ ] Library storage: one file per track on Steam (today one localStorage string, thumbnails inside).
+- [ ] Bug to raise: an edit to a saved track silently replaces an unsaved new track's draft (one draft slot).
+
+Engine (the engine track is paused — the user reopens it):
+- [ ] Game pages stop loading the world editor's systems (479 modules: rivers, lakes, roads, panels) — the biggest load + memory lever left.
+- [ ] The river system's empty rock instances draw every frame (~7 draws, every v3 game page).
+- [ ] Ground features per world, the grid size, culling the ground behind a ground-level camera (when terrain worlds arrive: step 1, skipped).
+- [ ] The beams' depth copy at night (read the scene pass's depth instead).
+- [ ] Sky haze full-res copy-back; the sky dome shades every pixel before the ground covers it.
+
+Shipping:
+- [ ] The Steam shell (Electron) with its own shader cache — the biggest load lever (~10 s of DXC compiles).
+- [ ] A Thunderline production build (vite inputs + an asset whitelist; today `vite build` copies all 985 MB of public/).
+- [ ] Local fonts (Google Fonts today).
+- [ ] A quality menu: resolution scale, MSAA, bloom resolution.

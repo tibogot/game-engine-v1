@@ -413,8 +413,12 @@ function piece(id, open = false) {
 function meshesFor(id, open) {
   const { look } = piece(id, open);
   const g = new THREE.Group();
-  if (look.glass) { g.add(new THREE.Mesh(look.drawn, mats.road)); g.add(new THREE.Mesh(look.glass, mats.glass)); g.add(new THREE.Mesh(look.trimFrame, mats.trim)); } // the glass road
+  if (look.glass) { g.add(new THREE.Mesh(look.drawn, mats.roadOpen)); g.add(new THREE.Mesh(look.glass, mats.glass)); g.add(new THREE.Mesh(look.trimFrame, mats.trim)); } // the glass road
   else g.add(new THREE.Mesh(look.deck, TILES[id]?.tube || TILES[id]?.halfpipe ? mats.tube : mats.road));
+  // ITS LIDS, both ends (the road is drawn one-sided: a piece alone — the dock's picture, the gizmo's drag — showed
+  // its open ends through; where two pieces meet each lid faces into the other's solid, never seen)
+  for (const e of look.ends ?? []) if (e.geo) g.add(new THREE.Mesh(e.geo, mats.road));
+  if (look.capsFixed) g.add(new THREE.Mesh(look.capsFixed, mats.road));
   if (look.rail) g.add(new THREE.Mesh(look.rail, look.trim ? mats.trim : mats.rail));
   if (look.under) g.add(new THREE.Mesh(look.under, mats.stripe)); // stunt stripes (oldLook.js STRIPED)
   if (look.posts?.template && look.posts.matrices.length) {

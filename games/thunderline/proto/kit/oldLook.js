@@ -25,7 +25,14 @@ function makeOldLookMaterials() {
   // ?asphalt=<scan> picks another (roadSurface.js ROAD_SCANS); ?asphalt=old = the old game's road, for an A/B
   const pick = new URLSearchParams(globalThis.location?.search ?? "").get("asphalt") ?? "tarred_gravel";
   const scan = pick === "old" ? null : createScanDeck(pick);
-  const road = scan ? createRoadMaterial({ buildSurface: buildWornSurface, deck: scan.hook }) : createRoadMaterial();
+  // ONE-SIDED (2026-11-03): every road piece's deck is a CLOSED solid — its ends lidded where nothing covers them, a
+  // point's tip always (deckClosedTest.mjs checks every piece of the kit) — so its back faces never show; double-
+  // sided drew them all and flipped their shading. The glass road's deck has its window cut out: its own double-
+  // sided copy (made by the same factory: a node material's clone drops its maps). ?roadside=double: the old way.
+  const double = new URLSearchParams(globalThis.location?.search ?? "").get("roadside") === "double";
+  const makeRoad = (side) => (scan ? createRoadMaterial({ buildSurface: buildWornSurface, deck: scan.hook, side }) : createRoadMaterial({ side }));
+  const road = makeRoad(double ? THREE.DoubleSide : THREE.FrontSide);
+  let roadOpen = null; // (made on first use: only a track with glass draws it)
   if (typeof window !== "undefined") Object.assign(window, { __roadWear: ROAD_WEAR, __roadScan: ROAD_SCAN, __roadScanUse: scan?.use });
   // The deck casts its shadow from its UNDERSIDE only (back faces into the shadow map), so its top
   // can't shadow itself. Without this, under Sky Pro's lower sun the road self-shadowed into a dark
@@ -46,7 +53,11 @@ function makeOldLookMaterials() {
   // away from the sun showed only reflections, dark blue under the car and bright at a grazing angle
   // further on. Satin (0.5 / 0.25) is one even sky-lit tone along its length. The old game keeps its own.
   // the GLASS road's pane (buildGlassLook): the old game's real glass, double-sided — you see it from under the track too
-  return { road, tube, trim, rail: createGuardrailMaterial({ roughness: 0.5, metalness: 0.25 }), stripe, glass: createRoadGlassMaterial(), ready: scan?.ready ?? Promise.resolve() };
+  return {
+    road, tube, trim, rail: createGuardrailMaterial({ roughness: 0.5, metalness: 0.25 }), stripe, glass: createRoadGlassMaterial(), ready: scan?.ready ?? Promise.resolve(),
+    /** the road material, double-sided: a deck that is NOT closed (the glass road's, its window cut out) */
+    get roadOpen() { if (!roadOpen) { roadOpen = double ? road : makeRoad(THREE.DoubleSide); roadOpen.shadowSide = road.shadowSide; } return roadOpen; },
+  };
 }
 
 /**
@@ -178,7 +189,11 @@ function buildTaperLook(tile, edges) {
     return endOf(frames[i], s, hwE, sig, capGeometry(deck, frames[i], sideProfile({ ...TL_ROAD, width: 2 * hwE }, sides).pts, s));
   };
   const ends = [tEnd(0, -1), tEnd(iN, 1)].filter(Boolean);
-  if (!edges) return { deck, rail: null, railCollision: null, posts: null, under: null, ends };
+  // A POINT'S LID, always drawn (2026-11-03, the closed-deck check): a wedge's tip or a round end never narrows under
+  // 0.3 m, so its last ring left a 0.6 m slit open — nothing joins there, so no end, and no lid either
+  const tips = [[0, -1], [iN, 1]].filter(([i]) => hwAt(i) < 1).map(([i, s]) => capGeometry(deck, frames[i], sideProfile({ ...TL_ROAD, width: 2 * hwAt(i) }, sides).pts, s)).filter(Boolean);
+  const capsFixed = tips.length ? (tips.length === 1 ? tips[0] : mergeGeometries(tips)) : null;
+  if (!edges) return { deck, rail: null, railCollision: null, posts: null, under: null, ends, capsFixed };
   // each side: the frames moved sideways by (half width here − the narrow half width), tangents along
   // the moved edge (a converging rail faces along ITS line, not the road's centre line)
   const rp = { ...TL_ROAD, width: 2 * narrow };
@@ -200,7 +215,7 @@ function buildTaperLook(tile, edges) {
     cols.push(buildRailCollision(fr, rp, RAIL, { sides: [side] }));
   }
   const merge = (gs) => mergeGeometries(gs.filter(Boolean));
-  return { deck, rail: merge(rails), railCollision: merge(cols), posts, under: null, ends };
+  return { deck, rail: merge(rails), railCollision: merge(cols), posts, under: null, ends, capsFixed };
 }
 
 // ---------- END CAPS (user, 2026-10-23: "we need caps on the road side … check my old game: it recognises when
